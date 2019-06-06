@@ -24,6 +24,7 @@
 
 #include <gnuradio/io_signature.h>
 #include <baz_usrp_acquire.h>
+#include <uhd/convert.hpp>
 
 namespace gr {
   namespace baz {
@@ -49,18 +50,69 @@ namespace gr {
         : m_dev(dev)
         , m_stream_args(stream_args)
         , m_samps_per_packet(0)
+        , m_buff_size(0)
     {
+        fprintf(stderr, "[usrp_acquire] CPU format: %s\n", stream_args.cpu_format.c_str());
+
+        if (stream_args.cpu_format == "fc32")
+            m_item_size = sizeof(std::complex<float>);
+        else if (stream_args.cpu_format == "sc16")
+            m_item_size = sizeof(std::complex<short>);
+        else if (stream_args.cpu_format == "sc8")
+            m_item_size = sizeof(std::complex<char>);
+        else
+            throw std::runtime_error("Unsupported CPU type: " + stream_args.cpu_format);
     }
     
     usrp_acquire::~usrp_acquire()
     {
+         fprintf(stderr, "[usrp_acquire] Freeing %ld buffers\n", m_data.size());
+
         for (size_t i = 0; i < m_data.size(); ++i)
-            delete m_data[i];
+            delete [] m_data[i];
         
         m_data.clear();
     }
+
+    void usrp_acquire::reset(void)
+    {
+        if (m_rx_stream)
+        {
+            m_rx_stream = ::uhd::rx_streamer::sptr();
+        }
+    }
+
+    size_t usrp_acquire::flush(void)
+    {
+        if (!m_rx_stream)
+            return 0;
+
+        const size_t nbytes = 4096;
+        const size_t bpi = ::uhd::convert::get_bytes_per_item(m_stream_args.cpu_format);
+        const size_t _nchan = m_stream_args.channels.size();
+
+        gr_vector_void_star outputs;
+        std::vector<std::vector<char> > buffs(_nchan, std::vector<char>(nbytes));
+
+        for (size_t i = 0; i < _nchan; i++)
+            outputs.push_back(&buffs[i].front());
+
+        ::uhd::rx_metadata_t rx_metadata;
+
+        size_t recv_count = 0;
+
+        while (true)
+        {
+            recv_count += m_rx_stream->recv(outputs, (nbytes / bpi), rx_metadata, 0.0);
+
+            if(rx_metadata.error_code == ::uhd::rx_metadata_t::ERROR_CODE_TIMEOUT)
+                break;
+        }
+
+        return recv_count;
+    }
     
-    std::vector<size_t> usrp_acquire::finite_acquisition_v(const size_t nsamps, bool stream_now, double delay, size_t skip, double timeout)
+    std::vector<size_t> usrp_acquire::finite_acquisition_v(const size_t nsamps, bool stream_now, double delay, size_t skip, double timeout, bool loop/* = false*/)
     {
         boost::mutex::scoped_lock lock(d_mutex);
         
@@ -74,24 +126,25 @@ namespace gr {
             m_samps_per_packet = m_rx_stream->get_max_num_samps();
         }
         
-        size_t _nchan = m_stream_args.channels.size();
-        
-        // create a multi-dimensional container to hold an array of sample buffers
-        //std::vector<std::vector<std::complex<float> > > samps(_nchan, std::vector<std::complex<float> >(nsamps));
-        
-        const size_t item_size = sizeof(std::complex<float>);
+        // const size_t bpi = ::uhd::convert::get_bytes_per_item(m_stream_args.cpu_format);
+        const size_t _nchan = m_stream_args.channels.size();
         
         // load the void* vector of buffer pointers
         std::vector<void *> buffs(_nchan);
         for(size_t i = 0; i < _nchan; i++)
         {
             if (i >= m_data.size())
-                m_data.push_back(new std::vector<std::complex<float> >(nsamps));
-            else if (m_data[i]->size() != nsamps)
-                m_data[i]->resize(nsamps);
+                m_data.push_back(new unsigned char[nsamps * m_item_size]);
+            else if (m_buff_size != nsamps)
+            {
+                delete [] m_data[i];
+                m_data[i] = new unsigned char[nsamps * m_item_size];
+            }
             
-            buffs[i] = &(m_data[i]->front());
+            buffs[i] = m_data[i];
         }
+
+        m_buff_size = nsamps;
         
         // tell the device to stream a finite amount
         ::uhd::stream_cmd_t cmd(::uhd::stream_cmd_t::STREAM_MODE_NUM_SAMPS_AND_DONE);
@@ -105,7 +158,21 @@ namespace gr {
         ::uhd::rx_metadata_t rx_metadata;
         
         // receive samples until timeout
-        const size_t actual_num_samps = m_rx_stream->recv(buffs, nsamps, rx_metadata, timeout);
+        size_t actual_num_samps = 0;
+
+        while (actual_num_samps < nsamps)
+        {
+            size_t _actual_num_samps = m_rx_stream->recv(buffs, (nsamps - actual_num_samps), rx_metadata, timeout);
+            actual_num_samps += _actual_num_samps;
+
+            if ((loop == false) || (_actual_num_samps == 0))
+                break;
+
+            for (size_t i = 0; i < _nchan; i++)
+            {
+                buffs[i] = m_data[i] + (actual_num_samps * /*bpi*/m_item_size);
+            }
+        }
         
         std::vector<size_t> res;
         
@@ -115,9 +182,8 @@ namespace gr {
         // resize the resulting sample buffers
         for(size_t i = 0; i < _nchan; i++)
         {
-            m_data[i]->resize(actual_num_samps);
-            size_t ptr = (size_t)&(m_data[i]->front());
-            ptr += (to_skip * item_size);
+            size_t ptr = (size_t)m_data[i];
+            ptr += (to_skip * m_item_size);
             res.push_back(ptr);
         }
         

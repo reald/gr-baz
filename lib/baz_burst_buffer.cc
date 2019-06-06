@@ -38,12 +38,14 @@
 
 using namespace std;
 
-baz_burst_buffer_sptr baz_make_burst_buffer (size_t itemsize, int flush_length /*= 0*/, bool verbose /*= false*/)
+// FIXME: 'strip_tags'
+
+baz_burst_buffer_sptr baz_make_burst_buffer (size_t itemsize, int flush_length /*= 0*/, const std::string& length_tag_name/* = ""*/, bool verbose/* = false*/, bool only_burst/* = false*/, bool strip_tags/* = true*/)
 {
-	return baz_burst_buffer_sptr (new baz_burst_buffer (itemsize, flush_length, verbose));
+	return baz_burst_buffer_sptr (new baz_burst_buffer (itemsize, flush_length, length_tag_name, verbose, only_burst, strip_tags));
 }
 
-baz_burst_buffer::baz_burst_buffer (size_t itemsize, int flush_length /*= 0*/, bool verbose /*= false*/)
+baz_burst_buffer::baz_burst_buffer (size_t itemsize, int flush_length /*= 0*/, const std::string& length_tag_name/* = ""*/, bool verbose/* = false*/, bool only_burst/* = false*/, bool strip_tags/* = true*/)
   : gr::block ("burst_buffer",
 		gr::io_signature::make (1, 1, itemsize),
 		gr::io_signature::make (1, 1, itemsize))
@@ -56,10 +58,17 @@ baz_burst_buffer::baz_burst_buffer (size_t itemsize, int flush_length /*= 0*/, b
 	, d_flush_length(flush_length)
 	, d_flush_count(0)
 	, d_verbose(verbose)
+	, d_use_length_tag(false)
+	, d_length_tag_name(pmt::mp(length_tag_name))
+	, d_strip_tags(strip_tags)
+	, d_sob_offset(-1)
+	, d_only_burst(only_burst)
 {
 	set_tag_propagation_policy(block::TPP_DONT);
 	
-	fprintf(stderr, "[%s<%i>] item size: %d\n", name().c_str(), unique_id(), itemsize);
+	fprintf(stderr, "[%s<%li>] item size: %lu, flush length: %d, length tag name: %s, only burst: %s, strip tags: %s\n", name().c_str(), unique_id(), itemsize, flush_length, length_tag_name.c_str(), (only_burst ? "yes" : "no"), (strip_tags ? "yes": "no"));
+
+	d_use_length_tag = (length_tag_name.size() > 0);
 
 	reallocate_buffer();
 }
@@ -97,7 +106,7 @@ void baz_burst_buffer::reallocate_buffer(void)
 	
 	assert(d_buffer != NULL);
 	
-	fprintf(stderr, "[%s<%i>] buffer now: %d samples\n", name().c_str(), unique_id(), d_buffer_size);
+	fprintf(stderr, "[%s<%li>] buffer now: %lu samples\n", name().c_str(), unique_id(), d_buffer_size);
 }
 
 void baz_burst_buffer::forecast(int noutput_items, gr_vector_int &ninput_items_required)
@@ -127,6 +136,7 @@ void baz_burst_buffer::forecast(int noutput_items, gr_vector_int &ninput_items_r
 static const pmt::pmt_t SOB_KEY = pmt::string_to_symbol("tx_sob");
 static const pmt::pmt_t EOB_KEY = pmt::string_to_symbol("tx_eob");
 static const pmt::pmt_t IGNORE_KEY = pmt::string_to_symbol("ignore");
+static const pmt::pmt_t OFFSET_KEY = pmt::string_to_symbol("offset");
 
 int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_items, gr_vector_const_void_star &input_items, gr_vector_void_star &output_items)
 {
@@ -140,7 +150,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 	if ((d_sample_count > 0) && (d_in_burst == false))
 	{
 		if (d_verbose)
-			fprintf(stderr, "[%s<%i>] Outputting buffer (%d samples)\n", name().c_str(), unique_id(), d_sample_count);
+			fprintf(stderr, "[%s<%li>] Outputting buffer (%lu samples)\n", name().c_str(), unique_id(), d_sample_count);
 		
 		int to_copy = std::min((size_t)noutput_items, d_sample_count);
 		
@@ -150,9 +160,13 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		
 		if (d_add_sob)
 		{
-			if (d_verbose) fprintf(stderr, "[%s<%i>] Adding SOB\n", name().c_str(), unique_id());
+			if (d_verbose) fprintf(stderr, "[%s<%li>] Adding SOB\n", name().c_str(), unique_id());
 			
 			add_item_tag(0, nitems_written(0), SOB_KEY, pmt::from_bool(true));
+			add_item_tag(0, nitems_written(0), OFFSET_KEY, pmt::from_long(d_sob_offset));
+
+			if (d_use_length_tag)
+				add_item_tag(0, nitems_written(0), d_length_tag_name, pmt::from_long(d_sample_count));
 			
 			d_add_sob = false;
 		}
@@ -161,7 +175,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		
 		if (d_sample_count == 0)
 		{
-			if (d_verbose) fprintf(stderr, "[%s<%i>] Adding EOB\n", name().c_str(), unique_id());
+			if (d_verbose) fprintf(stderr, "[%s<%li>] Adding EOB\n", name().c_str(), unique_id());
 			
 			add_item_tag(0, nitems_written(0)+to_copy-1, EOB_KEY, pmt::from_bool(true));
 			
@@ -179,7 +193,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		
 		if (d_flush_count == d_flush_length)
 		{
-			if (d_verbose) fprintf(stderr, "[%s<%i>] Starting flush at head of work (noutput_items: %d)\n", name().c_str(), unique_id(), noutput_items);
+			if (d_verbose) fprintf(stderr, "[%s<%li>] Starting flush at head of work (noutput_items: %d)\n", name().c_str(), unique_id(), noutput_items);
 			
 			add_item_tag(0, nitems_written(0), SOB_KEY, pmt::from_bool(true));
 			add_item_tag(0, nitems_written(0), IGNORE_KEY, pmt::from_bool(true));
@@ -189,7 +203,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		
 		if (to_go == d_flush_count)
 		{
-			if (d_verbose) fprintf(stderr, "[%s<%i>] Finishing flush in work (noutput_items: %d, to_go: %d)\n", name().c_str(), unique_id(), noutput_items, to_go);
+			if (d_verbose) fprintf(stderr, "[%s<%li>] Finishing flush in work (noutput_items: %d, to_go: %d)\n", name().c_str(), unique_id(), noutput_items, to_go);
 			
 			add_item_tag(0, nitems_written(0)+to_go-1, EOB_KEY, pmt::from_bool(true));
 		}
@@ -235,9 +249,12 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		
 		if (d_in_burst == false)
 		{
-			memcpy(out, in, d_itemsize * to_copy);
-			
-			produced = to_copy;
+			if (d_only_burst == false)
+			{
+				memcpy(out, in, d_itemsize * to_copy);
+				
+				produced = to_copy;
+			}
 		}
 		else
 		{
@@ -268,22 +285,23 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		{
 			if (d_in_burst)
 			{
-				fprintf(stderr, "[%s<%i>] Already in burst!\n", name().c_str(), unique_id());
+				fprintf(stderr, "[%s<%li>] Already in burst!\n", name().c_str(), unique_id());
 			}
 			else
 			{
-				if (d_verbose) fprintf(stderr, "[%s<%i>] Found SOB\n", name().c_str(), unique_id());
+				if (d_verbose) fprintf(stderr, "[%s<%li>] Found SOB\n", name().c_str(), unique_id());
 				
 				assert(nread == tag.offset);	// Should always be first
 				
 				d_in_burst = true;
+				d_sob_offset = tag.offset;
 			}
 		}
 		else if (pmt::equal(tag.key, EOB_KEY))
 		{
 			if (d_in_burst)
 			{
-				if (d_verbose) fprintf(stderr, "[%s<%i>] Found EOB\n", name().c_str(), unique_id());
+				if (d_verbose) fprintf(stderr, "[%s<%li>] Found EOB\n", name().c_str(), unique_id());
 				
 				burst_length = tag.offset - nread + 1;
 				
@@ -293,7 +311,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 			}
 			else
 			{
-				fprintf(stderr, "[%s<%i>] Not in a burst!\n", name().c_str(), unique_id());
+				fprintf(stderr, "[%s<%li>] Not in a burst!\n", name().c_str(), unique_id());
 				
 				std::string key = pmt::symbol_to_string(tag.key);
 				fprintf(stderr, "\t%llu: %s\n", tag.offset, key.c_str());
@@ -301,7 +319,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 		}
 		else
 		{
-			fprintf(stderr, "[%s<%i>] Unexpected tag!\n", name().c_str(), unique_id());
+			fprintf(stderr, "[%s<%li>] Unexpected tag!\n", name().c_str(), unique_id());
 			
 			assert(false);	// Shouldn't get here
 		}
@@ -319,7 +337,7 @@ int baz_burst_buffer::general_work (int noutput_items, gr_vector_int &ninput_ite
 	}
 	else
 	{
-		fprintf(stderr, "[%s<%i>] Invalid state!\n", name().c_str(), unique_id());
+		fprintf(stderr, "[%s<%li>] Invalid state!\n", name().c_str(), unique_id());
 		
 		assert(false);
 	}

@@ -45,7 +45,7 @@
  * a boost shared_ptr.  This is effectively the public constructor.
  */
 baz_time_keeper_sptr
-baz_make_time_keeper (int item_size, int sample_rate)
+baz_make_time_keeper (int item_size, float sample_rate)
 {
 	return baz_time_keeper_sptr (new baz_time_keeper (item_size, sample_rate));
 }
@@ -53,17 +53,17 @@ baz_make_time_keeper (int item_size, int sample_rate)
 /*
  * The private constructor
  */
-baz_time_keeper::baz_time_keeper (int item_size, int sample_rate)
+baz_time_keeper::baz_time_keeper (int item_size, float sample_rate)
 	: gr::sync_block ("baz_time_keeper",
 		gr::io_signature::make (1, 1, item_size),
 		gr::io_signature::make (0, 0, 0))
 	, d_item_size(item_size), d_sample_rate(sample_rate)
 	, d_last_time_seconds(0), d_first_time_seconds(0), d_last_time_fractional_seconds(0), d_first_time_fractional_seconds(0)
-	, d_time_offset(-1), d_seen_time(false), d_update_count(0), d_ignore_next(true)	// Ignore first update
+	, d_time_offset(0), d_seen_time(false), d_update_count(0), d_ignore_next(true)	// Ignore first update
 {
 	//memset(&d_last_time, 0x00, sizeof(uhd::time_spec_t));
 
-	fprintf(stderr, "[%s<%i>] item size: %d, sample rate: %d\n", name().c_str(), unique_id(), item_size, sample_rate);
+	fprintf(stderr, "[%s<%li>] item size: %d, sample rate: %f\n", name().c_str(), unique_id(), item_size, sample_rate);
 
 	d_status_port_id = pmt::mp("status");
 	message_port_register_out(d_status_port_id);
@@ -123,6 +123,8 @@ int baz_time_keeper::work (int noutput_items, gr_vector_const_void_star &input_i
 	// [1] Next tag: expecting frequent re-tunes & less overruns
 	// [2] All tags: expecting infrequent re-tunes & more overruns
 	if (tags.size() > 0) {
+		std::sort(tags.begin(), tags.end(), gr::tag_t::offset_compare);
+
 		if (d_ignore_next == false)	// [1]
 			d_update_count += tags.size() - 1;
 		//else if (tags.size() > 1)	// [1]
@@ -133,7 +135,7 @@ int baz_time_keeper::work (int noutput_items, gr_vector_const_void_star &input_i
 	for (int i = /*0*/(tags.size() - 1); i < tags.size(); ++i) {
 		const gr::tag_t& tag = tags[i];
 		
-		//fprintf(stderr, "[%s<%i>] Tag #%d %s\n", name().c_str(), unique_id(), i, pmt::write_string(tag.key).c_str());
+		//fprintf(stderr, "[%s<%i>] Tag #%d %s: %s\n", name().c_str(), unique_id(), i, pmt::write_string(tag.key).c_str(), pmt::write_string(tag.value).c_str());
 		
 		d_time_offset = 0;
 		offset = tags[i].offset - nread;

@@ -80,6 +80,12 @@ SET(baz_blocks
 	baz_any_message.xml
 	fec_sync.xml
 	baz_additive_scrambler_bb.xml
+	baz_fractional_resampler_xx.xml
+	baz_file_source.xml
+
+	baz_block_tree.xml
+
+	baz_dpll.xml
 )
 
 if (LIBUSB_FOUND)
@@ -88,6 +94,10 @@ endif ()
 
 if (UHD_FOUND)
 	LIST(APPEND baz_blocks baz_gate.xml)
+endif ()
+
+if (SDL_FOUND)
+	LIST(APPEND baz_blocks baz_sdl_sink.xml)
 endif ()
 
 install(FILES

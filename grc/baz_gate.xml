@@ -2,10 +2,18 @@
 <block>
     <name>Gate</name>
     <key>gate</key>
-    <category>Misc</category>
+    <!--<category>Misc</category>-->
     <import>from gnuradio import gr</import>
     <import>import baz</import>
-    <make>baz.gate($(type.size), $block, $threshold, $trigger_length, $tag, $delay, $sample_rate, $no_delay, $verbose, $retriggerable)</make>
+    <make>baz.gate(item_size=$(type.size), block=$block, threshold=$threshold, trigger_length=$trigger_length, tag=$tag, delay=$delay, sample_rate=$sample_rate, no_delay=$no_delay, verbose=$verbose, retriggerable=$retriggerable,#slurp
+#if len($length_tag_name()) > 0
+length_tag_name=$length_tag_name,#slurp
+#end if
+complete_output=$complete_output, byte_trigger=$byte_trigger,#slurp
+#if len($trigger_tag_name()) > 0
+trigger_tag_name=$trigger_tag_name,#slurp
+#end if
+)</make>
 
     <callback>set_blocking($block)</callback>
     <callback>set_threshold($threshold)</callback>
@@ -43,6 +51,24 @@
 			<name>Byte</name>
 			<key>byte</key>
 			<opt>size:1</opt>
+		</option>
+	</param>
+
+	<param>
+		<name>Trigger type</name>
+		<key>byte_trigger</key>
+		<value>False</value>
+		<type>enum</type>
+		<hide>part</hide>
+		<option>
+			<name>Float</name>
+			<key>False</key>
+			<opt>trig_type:float</opt>
+		</option>
+		<option>
+			<name>Byte</name>
+			<key>True</key>
+			<opt>trig_type:byte</opt>
 		</option>
 	</param>
 
@@ -156,6 +182,38 @@
 		</option>
 	</param>
 
+	<param>
+		<name>Length Tag Name</name>
+		<key>length_tag_name</key>
+		<value>''</value>
+		<type>string</type>
+		<hide>#if len($length_tag_name()) == 0 then 'part' else 'none'#</hide>
+  	</param>
+
+  	<param>
+		<name>Complete output</name>
+		<key>complete_output</key>
+		<value>False</value>
+		<type>bool</type>
+		<hide>#if str($retriggerable) == 'True' then 'none' else 'all'#</hide>
+		<option>
+			<name>Yes</name>
+			<key>True</key>
+		</option>
+		<option>
+			<name>No</name>
+			<key>False</key>
+		</option>
+	</param>
+
+	<param>
+		<name>Trigger Tag Name</name>
+		<key>trigger_tag_name</key>
+		<value>''</value>
+		<type>string</type>
+		<hide>#if len($trigger_tag_name()) == 0 then 'part' else 'none'#</hide>
+  	</param>
+
 <!-- Must come before sink/source -->
   <!--<check></check>-->
 
@@ -166,7 +224,7 @@
 
   <sink>
     <name>gate</name>
-    <type>float</type>
+    <type>$(byte_trigger.trig_type)</type>
   </sink>
 
   <sink>

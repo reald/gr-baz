@@ -54,6 +54,16 @@
 #include "baz_burst_tagger.h"
 #include "baz_burst_buffer.h"
 #include "baz_additive_scrambler_bb.h"
+#include "baz_correlator.h"
+#include "baz_dpll_bb.h"
+#include "baz_fractional_resampler_cc.h"
+#include "baz_fractional_resampler_ff.h"
+#include "baz_colouriser.h"
+#include "baz_swap.h"
+#include "baz_interleaver.h"
+#include "baz_field_tracker.h"
+#include "baz_keep_one_in_n.h"
+#include "baz_file_source.h"
 
 #ifdef UHD_FOUND
 #include "baz_gate.h"
@@ -64,6 +74,10 @@
 #ifdef ARMADILLO_FOUND
 #include "baz_music_doa.h"
 #endif // ARMADILLO_FOUND
+
+#ifdef SDL_FOUND
+#include "baz_sdl_sink_uc.h"
+#endif // SDL_FOUND
 
 #endif // GR_BAZ_WITH_CMAKE
 
@@ -169,12 +183,12 @@ public:	// SWIG get: tuner ranges/values
 
 GR_SWIG_BLOCK_MAGIC(baz,print_char);
 
-baz_print_char_sptr baz_make_print_char (float threshold = 0.0, int limit = -1, const char* file = NULL, int padding = 1, bool fixed_limit = false);
+baz_print_char_sptr baz_make_print_char (float threshold = 0.0, int limit = -1, const char* file = NULL, int padding = 1, bool fixed_limit = false, bool append = false);
 
 class baz_print_char : public gr::sync_block
 {
 private:
-  baz_print_char (float threshold, int limit, const char* file, int padding, bool fixed_limit);
+  baz_print_char (float threshold, int limit, const char* file, int padding, bool fixed_limit, bool append);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -328,13 +342,13 @@ class gr_udp_source : public gr::sync_block
 baz_udp_source_sptr 
 baz_make_udp_source (size_t itemsize, const char *host, 
 		    unsigned short port, int payload_size=1472,
-		    bool eof=true, bool wait=true, bool bor=false, bool verbose=false) throw (std::runtime_error);
+		    bool eof=true, bool wait=true, bool bor=false, bool verbose=false, size_t buf_size = 0, int mode = -1) throw (std::runtime_error);
 
 class baz_udp_source : public gr::sync_block
 {
  protected:
   baz_udp_source (size_t itemsize, const char *host, 
-		 unsigned short port, int payload_size, bool eof, bool wait, bool bor, bool verbose) throw (std::runtime_error);
+		 unsigned short port, int payload_size, bool eof, bool wait, bool bor, bool verbose, size_t buf_size, int mode) throw (std::runtime_error);
 
  public:
   ~baz_udp_source ();
@@ -492,12 +506,12 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,gate)
 
-baz_gate_sptr baz_make_gate (int item_size, bool block = true, float threshold = 1.0, int trigger_length = 0, bool tag = false, double delay = 0.0, int sample_rate = 0, bool no_delay = false, bool verbose = true, bool retriggerable = false);
+baz_gate_sptr baz_make_gate (int item_size, bool block = true, float threshold = 1.0, int trigger_length = 0, bool tag = false, double delay = 0.0, int sample_rate = 0, bool no_delay = false, bool verbose = true, bool retriggerable = false, const std::string& length_tag_name = "", bool complete_output = false, bool byte_trigger = false, const std::string& trigger_tag_name = "");
 
 class baz_gate : public gr::sync_block
 {
 private:
-  baz_gate (int item_size, bool block, float threshold, int trigger_length, bool tag, double delay, int sample_rate, bool no_delay, bool verbose, bool retriggerable);  	// private constructor
+  baz_gate (int item_size, bool block, float threshold, int trigger_length, bool tag, double delay, int sample_rate, bool no_delay, bool verbose, bool retriggerable, const std::string& length_tag_name, bool complete_output, bool byte_trigger, const std::string& trigger_tag_name);  	// private constructor
 public:
   void set_blocking(bool enable);
   void set_threshold(float threshold);
@@ -595,12 +609,12 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,time_keeper)
 
-baz_time_keeper_sptr baz_make_time_keeper (int item_size, int sample_rate);
+baz_time_keeper_sptr baz_make_time_keeper (int item_size, float sample_rate);
 
 class baz_time_keeper : public gr::sync_block
 {
 private:
-	baz_time_keeper (int item_size, int sample_rate);  	// private constructor
+	baz_time_keeper (int item_size, float sample_rate);  	// private constructor
 public:
 	double time(bool relative = false);
 	void ignore_next(bool ignore = true);
@@ -759,11 +773,11 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,overlap)
 
-baz_overlap_sptr baz_make_overlap (int item_size, int vlen, int overlap, int samp_rate);
+baz_overlap_sptr baz_make_overlap (int item_size, int vlen, int overlap);
 
 class baz_overlap : public gr::block
 {
-	baz_overlap (int item_size, int vlen, int overlap, int samp_rate);  	// private constructor
+	baz_overlap (int item_size, int vlen, int overlap);  	// private constructor
 public:
 	void set_overlap(int overlap);
 };
@@ -772,11 +786,11 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,manchester_decode_bb)
 
-baz_manchester_decode_bb_sptr baz_make_manchester_decode_bb (bool original, int threshold, int window, bool verbose = false);
+baz_manchester_decode_bb_sptr baz_make_manchester_decode_bb (bool original, int threshold, int window, bool verbose = false, bool show_bits = false);
 
 class baz_manchester_decode_bb : public gr::block
 {
-  baz_manchester_decode_bb (bool original, int threshold, int window, bool verbose);  	// private constructor
+  baz_manchester_decode_bb (bool original, int threshold, int window, bool verbose, bool show_bits);  	// private constructor
 public:
 };
 
@@ -797,11 +811,11 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,merge)
 
-baz_merge_sptr baz_make_merge (int item_size, float samp_rate, int additional_streams = 1, bool drop_residual = true, const char* length_tag = "length", const char* ignore_tag = "ignore");
+baz_merge_sptr baz_make_merge (int item_size, float samp_rate, int additional_streams = 1, bool drop_residual = true, const char* length_tag = "length", const char* ignore_tag = "ignore", bool verbose = false);
 
 class baz_merge : public gr::block
 {
-	baz_merge (int item_size, float samp_rate, int additional_streams, bool drop_residual, const char* length_tag, const char* ignore_tag);  	// private constructor
+	baz_merge (int item_size, float samp_rate, int additional_streams, bool drop_residual, const char* length_tag, const char* ignore_tag, bool verbose);  	// private constructor
 public:
 	void set_start_time(double time);
 	void set_start_time(uint64_t whole, double frac);
@@ -860,14 +874,18 @@ public:
 
 GR_SWIG_BLOCK_MAGIC(baz,peak_detector);
 
-baz_peak_detector_sptr baz_make_peak_detector (float min_diff = 0.0, int min_len = 1, int lockout = 0, float drop = 0.0, float alpha = 1.0, int look_ahead = 0);
+baz_peak_detector_sptr baz_make_peak_detector (float min_diff = 0.0, int min_len = 1, int lockout = 0, float drop = 0.0, float alpha = 1.0, int look_ahead = 0, bool byte_output = false, bool verbose = false);
 
 class BAZ_API baz_peak_detector : public gr::block
 {
 protected:
-	baz_peak_detector(float min_diff, int min_len, int lockout, float drop, float alpha, int look_ahead);  	// private constructor
+	baz_peak_detector(float min_diff, int min_len, int lockout, float drop, float alpha, int look_ahead, bool byte_output, bool verbose);  	// private constructor
 public:
 	~baz_peak_detector ();
+	void set_threshold(float threshold);
+	void unset_threshold();
+	float threshold() const;
+	bool threshold_set() const;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -880,12 +898,12 @@ GR_SWIG_BLOCK_MAGIC2(baz, burst_tagger);
 
 GR_SWIG_BLOCK_MAGIC(baz,burst_buffer);
 
-baz_burst_buffer_sptr baz_make_burst_buffer (int itemsize, bool verbose = false);
+baz_burst_buffer_sptr baz_make_burst_buffer (int itemsize, int flush_length = 0, const std::string& length_tag_name = "", bool verbose = false, bool only_burst = false, bool strip_tags = true);
 
 class baz_burst_buffer : public gr::block
 {
 protected:
-	baz_burst_buffer (int itemsize, bool verbose = false);
+	baz_burst_buffer (int itemsize, int flush_length = 0, const std::string& length_tag_name = "", bool verbose = false, bool only_burst = false, bool strip_tags = true);
 public:
 	~baz_burst_buffer();
 };
@@ -895,6 +913,106 @@ public:
 %include "baz_additive_scrambler_bb.h"
 
 GR_SWIG_BLOCK_MAGIC2(baz, additive_scrambler_bb);
+
+////////////////////////////////////////////////////////////////////////////////
+
+GR_SWIG_BLOCK_MAGIC(baz,correlator);
+
+baz_correlator_sptr baz_make_correlator(
+    float samp_rate,
+    float symbol_rate,
+    int window_length,
+    float threshold=0.5,
+    int width=1024,
+    const char* sync_path="sync.dat",
+    int sync_length=511,
+    int sync_offset=50,
+    //sync_dtype='c8',
+    int sync_window_length=50
+);
+
+class baz_correlator : public gr::block
+{
+protected:
+	baz_burst_buffer(
+        float samp_rate,
+        float symbol_rate,
+        int window_length,
+        float threshold,
+        int width,
+        const char* sync_path,
+        int sync_length,
+        int sync_offset,
+        //sync_dtype='c8',
+        int sync_window_length
+);
+public:
+	~baz_correlator();
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_dpll_bb.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, dpll_bb);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_fractional_resampler_cc.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, fractional_resampler_cc);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_fractional_resampler_ff.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, fractional_resampler_ff);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_colouriser.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, colouriser);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_swap.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, swap);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_interleaver.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, interleaver);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_field_tracker.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, field_tracker);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_keep_one_in_n.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, keep_one_in_n);
+
+////////////////////////////////////////////////////////////////////////////////
+
+%include "baz_file_source.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, file_source);
+
+////////////////////////////////////////////////////////////////////////////////
+
+#ifdef SDL_FOUND
+
+%include "baz_sdl_sink_uc.h"
+
+GR_SWIG_BLOCK_MAGIC2(baz, sdl_sink_uc);
+
+#endif // SDL_FOUND
 
 ////////////////////////////////////////////////////////////////////////////////
 

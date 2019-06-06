@@ -49,6 +49,16 @@ SET(baz_headers
 	baz_burst_tagger.h
 	baz_burst_buffer.h
 	baz_additive_scrambler_bb.h
+	baz_correlator.h
+	baz_dpll_bb.h
+	baz_fractional_resampler_cc.h
+	baz_fractional_resampler_ff.h
+	baz_colouriser.h
+	baz_swap.h
+	baz_interleaver.h
+	baz_field_tracker.h
+	baz_keep_one_in_n.h
+	baz_file_source.h
 )
 
 if (LIBUSB_FOUND)
@@ -57,6 +67,10 @@ endif ()
 
 if (UHD_FOUND)
 	list(APPEND baz_headers baz_gate.h baz_usrp_acquire.h baz_hopper.h)
+endif ()
+
+if (SDL_FOUND)
+	list(APPEND baz_headers baz_sdl_sink_uc.h)
 endif ()
 
 install(FILES
@@ -103,6 +117,16 @@ SET(baz_sources
 	baz_burst_tagger_impl.cc
 	baz_burst_buffer.cc
 	baz_additive_scrambler_bb.cc
+	baz_correlator.cc
+	baz_dpll_bb.cc
+	baz_fractional_resampler_cc.cc
+	baz_fractional_resampler_ff.cc
+	baz_colouriser.cc
+	baz_swap.cc
+	baz_interleaver.cc
+	baz_field_tracker.cc
+	baz_keep_one_in_n.cc
+	baz_file_source.cc
 )
 
 if (LIBUSB_FOUND)
@@ -129,7 +153,17 @@ endif ()
 if (ARMADILLO_FOUND)
 	LIST(APPEND baz_sources baz_music_doa.cc)
 else ()
-	set(ARMADILLO_LIBRARIES)
+	set(ARMADILLO_LIBRARIES "")
+endif ()
+
+if (SDL_FOUND)
+	LIST(APPEND baz_sources baz_sdl_sink_uc.cc)
+else ()
+	set(SDL_LIBRARY "")
+endif ()
+
+if (NOT SDL_TTF_FOUND)
+	set(SDL_TTF_LIBRARY "")
 endif ()
 
 add_library(gnuradio-baz SHARED
@@ -142,16 +176,20 @@ list(APPEND baz_libs
 	${GNURADIO_PMT_LIBRARIES}
 	${GNURADIO_BLOCKS_LIBRARIES}
 	${GNURADIO_DIGITAL_LIBRARIES}
+	${GNURADIO_FILTER_LIBRARIES}
 	${LIBUSB_LIBRARIES}
 	${UHD_LIBRARIES}
 	${ARMADILLO_LIBRARIES}
+	${SDL_LIBRARY}
+	${SDL_TTF_LIBRARY}
+	${VOLK_LIBRARIES}
 )
 
 if(MSVC)
 	CHECK_INCLUDE_FILE_CXX(windows.h HAVE_WINDOWS_H)
 	IF(HAVE_WINDOWS_H)
 		ADD_DEFINITIONS(-DHAVE_WINDOWS_H -DUSING_WINSOCK)
-		MESSAGE(STATUS "Adding windows libs to gr baz libs...")
+		MESSAGE(STATUS "Adding windows libs to gr-baz libs...")
 		LIST(APPEND baz_libs WS2_32.lib WSock32.lib)
 	ENDIF(HAVE_WINDOWS_H)
 endif()

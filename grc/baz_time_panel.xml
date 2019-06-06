@@ -7,7 +7,7 @@
 <block>
 	<name>WX GUI Time Panel</name>
 	<key>baz_time_panel</key>
-	<category>Instrumentation/WX</category>
+	<!--<category>Instrumentation/WX</category>-->
 	
 	<import>from baz import time_panel</import>
 
@@ -35,7 +35,7 @@ $(parent).GridAdd(self.$(id).win, $(', '.join(map(str, $grid_pos()))))
 		<name>Sample Rate</name>
 		<key>samp_rate</key>
 		<value>samp_rate</value>
-		<type>int</type>
+		<type>real</type>
 	</param>
 
 	<param>
